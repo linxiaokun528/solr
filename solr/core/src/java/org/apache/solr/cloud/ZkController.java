@@ -252,6 +252,7 @@ public class ZkController implements Closeable {
   protected volatile Overseer overseer;
 
   private int leaderVoteWait;
+  private int eligibleLeaderWait;
   private int leaderConflictResolveWait;
 
   private int clientTimeout;
@@ -315,6 +316,7 @@ public class ZkController implements Closeable {
     this.nodeName = generateNodeName(this.hostName, Integer.toString(this.localHostPort));
     MDCLoggingContext.setNode(nodeName);
     this.leaderVoteWait = cloudConfig.getLeaderVoteWait();
+    this.eligibleLeaderWait = cloudConfig.getEligibleLeaderWait();
     this.leaderConflictResolveWait = cloudConfig.getLeaderConflictResolveWait();
     this.clientTimeout = cloudConfig.getZkClientTimeout();
 
@@ -700,6 +702,10 @@ public class ZkController implements Closeable {
 
   public int getLeaderVoteWait() {
     return leaderVoteWait;
+  }
+
+  public int getEligibleLeaderWait() {
+    return eligibleLeaderWait;
   }
 
   public int getLeaderConflictResolveWait() {

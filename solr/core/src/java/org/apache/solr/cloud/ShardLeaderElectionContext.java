@@ -184,7 +184,10 @@ final class ShardLeaderElectionContext extends ShardLeaderElectionContextBase {
         ZkShardTerms zkShardTerms = zkController.getShardTerms(collection, shardId);
         if (zkShardTerms.registered(coreNodeName) && !zkShardTerms.canBecomeLeader(coreNodeName)) {
           if (!waitForEligibleBecomeLeaderAfterTimeout(
-              zkShardTerms, coreNodeName, leaderVoteWait)) {
+              zkShardTerms, coreNodeName, zkController.getEligibleLeaderWait())) {
+            if (shouldAbort() || !cc.isLoaded(coreName)) {
+              return;
+            }
             rejoinLeaderElection(core);
             return;
           } else {
@@ -267,11 +270,10 @@ final class ShardLeaderElectionContext extends ShardLeaderElectionContextBase {
               }
             }
           }
-          // in case of leaderVoteWait timeout, a replica with lower term can win the election
+          // After the eligibility timeout, a replica with a lower term can win the election.
           if (setTermToMax) {
             log.error(
-                "WARNING: Potential data loss -- Replica {} became leader after timeout (leaderVoteWait) {}",
-                "without being up-to-date with the previous leader",
+                "WARNING: Potential data loss -- Replica {} became leader after timeout (eligibleLeaderWait) without being up-to-date with the previous leader",
                 coreNodeName);
             zkController.getShardTerms(collection, shardId).setTermEqualsToLeader(coreNodeName);
           }
@@ -332,17 +334,18 @@ final class ShardLeaderElectionContext extends ShardLeaderElectionContextBase {
   }
 
   /**
-   * Wait for other replicas with higher terms participate in the electioon
+   * Wait for replicas with higher terms to participate in the election.
    *
-   * @return true if after {@code timeout} there are no other replicas with higher term participate
-   *     in the election, false if otherwise
+   * @return true if the timeout expires; false if an eligible replica participates, this replica
+   *     becomes eligible, or the election is aborted. A negative timeout waits indefinitely.
    */
   private boolean waitForEligibleBecomeLeaderAfterTimeout(
       ZkShardTerms zkShardTerms, String coreNodeName, int timeout) throws InterruptedException {
+    String coreName = leaderProps.getStr(ZkStateReader.CORE_NAME_PROP);
     long timeoutAt =
         System.nanoTime() + TimeUnit.NANOSECONDS.convert(timeout, TimeUnit.MILLISECONDS);
-    while (!shouldAbort()) {
-      if (System.nanoTime() > timeoutAt) {
+    while (!shouldAbort() && cc.isLoaded(coreName)) {
+      if (timeout >= 0 && System.nanoTime() > timeoutAt) {
         log.warn(
             "After waiting for {}ms, no other potential leader was found, {} try to become leader anyway (core_term:{}, highest_term:{})",
             timeout,
@@ -354,6 +357,9 @@ final class ShardLeaderElectionContext extends ShardLeaderElectionContextBase {
       if (replicasWithHigherTermParticipated(zkShardTerms, coreNodeName)) {
         log.info(
             "Can't become leader, other replicas with higher term participated in leader election");
+        return false;
+      }
+      if (zkShardTerms.canBecomeLeader(coreNodeName)) {
         return false;
       }
       Thread.sleep(500L);

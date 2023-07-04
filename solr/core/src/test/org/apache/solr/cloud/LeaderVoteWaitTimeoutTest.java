@@ -74,7 +74,12 @@ public class LeaderVoteWaitTimeoutTest extends SolrCloudTestCase {
 
   @Before
   public void setupTest() throws Exception {
-    configureCluster(NODE_COUNT).addConfig("conf", configset("cloud-minimal")).configure();
+    configureCluster(NODE_COUNT)
+        .withSolrXml(
+            MiniSolrCloudCluster.DEFAULT_CLOUD_SOLR_XML.replace(
+                "</solrcloud>", "<int name=\"eligibleLeaderWait\">2000</int></solrcloud>"))
+        .addConfig("conf", configset("cloud-minimal"))
+        .configure();
 
     // Add proxies
     proxies = new HashMap<>(cluster.getJettySolrRunners().size());

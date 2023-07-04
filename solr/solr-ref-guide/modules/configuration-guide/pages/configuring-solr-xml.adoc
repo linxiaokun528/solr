@@ -414,6 +414,21 @@ If no port is passed via the `solr.xml` (i.e., `0`), then Solr will default to t
 +
 When SolrCloud is starting up, how long each Solr node will wait for all known replicas for that shard to be found before assuming that any nodes that haven't reported are down.
 
+`eligibleLeaderWait`::
++
+[%autowidth,frame=none]
+|===
+|Optional |Default: `-1`
+|===
++
+How long, in milliseconds, a replica with a lower shard term waits for an up-to-date replica before it may become leader.
+Any negative value waits indefinitely, so a stale replica cannot become leader just because the up-to-date replicas are unavailable.
+A positive value permits a stale replica to become leader after that timeout, risking loss of updates; `0` permits it immediately.
++
+Set this in the `<solrcloud>` section, for example `<int name="eligibleLeaderWait">180000</int>` to wait three minutes.
+With the default, the shard remains without a leader until an eligible replica returns or an operator uses the xref:deployment-guide:shard-management.adoc#forceleader[FORCELEADER API].
+Use the same value on all nodes to ensure consistent election behavior.
+
 `leaderConflictResolveWait`::
 +
 [%autowidth,frame=none]

@@ -44,6 +44,7 @@
     <int name="maxUpdateConnections">3</int>
     <int name="maxUpdateConnectionsPerHost">37</int>
     <int name="leaderVoteWait">55</int>
+    <int name="eligibleLeaderWait">66</int>
     <str name="host">testHost</str>
     <int name="hostPort">${hostPort:44}</int>
     <int name="zkClientTimeout">77</int>

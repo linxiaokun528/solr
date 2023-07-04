@@ -97,5 +97,7 @@ Use optimistic concurrency to make such read-modify-write cycles safe to retry.
 When a leader fails, Solr elects a new leader from the replicas that are known to be up-to-date, and the new leader first syncs any recent updates from its peers.
 Acknowledged updates therefore survive leader failover whenever at least one up-to-date replica remains.
 
-If no up-to-date replica is available after a waiting period (`leaderVoteWait`), Solr chooses availability over consistency: a potentially stale replica becomes leader so the shard can continue accepting updates, and updates that only the old leader had may be lost.
-Solr logs a "potential data loss" warning when this happens.
+If no up-to-date replica is available, Solr waits indefinitely by default, leaving the shard without a leader.
+The `eligibleLeaderWait` setting in xref:configuration-guide:configuring-solr-xml.adoc[`solr.xml`] controls this wait.
+A nonnegative value allows a potentially stale replica to become leader after that many milliseconds, so the shard can resume accepting updates, but updates that only unavailable replicas had may be lost.
+Solr logs a "potential data loss" warning when a stale replica becomes leader after this timeout.

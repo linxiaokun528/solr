@@ -526,6 +526,9 @@ public class SolrXmlConfig {
         case "leaderVoteWait":
           builder.setLeaderVoteWait(parseInt(name, value));
           break;
+        case "eligibleLeaderWait":
+          builder.setEligibleLeaderWait(parseInt(name, value));
+          break;
         case "leaderConflictResolveWait":
           builder.setLeaderConflictResolveWait(parseInt(name, value));
           break;

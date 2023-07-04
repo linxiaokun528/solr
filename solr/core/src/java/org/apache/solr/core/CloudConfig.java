@@ -31,6 +31,8 @@ public class CloudConfig {
 
   private final int leaderVoteWait;
 
+  private final int eligibleLeaderWait;
+
   private final int leaderConflictResolveWait;
 
   private final String zkCredentialsProviderClass;
@@ -57,6 +59,7 @@ public class CloudConfig {
       int hostPort,
       String hostName,
       int leaderVoteWait,
+      int eligibleLeaderWait,
       int leaderConflictResolveWait,
       String zkCredentialsProviderClass,
       String zkACLProviderClass,
@@ -72,6 +75,7 @@ public class CloudConfig {
     this.hostPort = hostPort;
     this.hostName = hostName;
     this.leaderVoteWait = leaderVoteWait;
+    this.eligibleLeaderWait = eligibleLeaderWait;
     this.leaderConflictResolveWait = leaderConflictResolveWait;
     this.zkCredentialsProviderClass = zkCredentialsProviderClass;
     this.zkACLProviderClass = zkACLProviderClass;
@@ -120,6 +124,13 @@ public class CloudConfig {
     return leaderVoteWait;
   }
 
+  /**
+   * Returns the wait in milliseconds for an eligible leader, or a negative value to wait forever.
+   */
+  public int getEligibleLeaderWait() {
+    return eligibleLeaderWait;
+  }
+
   public int getLeaderConflictResolveWait() {
     return leaderConflictResolveWait;
   }
@@ -151,6 +162,7 @@ public class CloudConfig {
   public static class CloudConfigBuilder {
 
     private static final int DEFAULT_LEADER_VOTE_WAIT = 180000; // 3 minutes
+    private static final int DEFAULT_ELIGIBLE_LEADER_WAIT = -1;
     private static final int DEFAULT_LEADER_CONFLICT_RESOLVE_WAIT = 180000;
     private static final int DEFAULT_CREATE_COLLECTION_ACTIVE_WAIT = 45; // 45 seconds
     private static final boolean DEFAULT_CREATE_COLLECTION_CHECK_LEADER_ACTIVE = false;
@@ -162,6 +174,7 @@ public class CloudConfig {
     private final int hostPort;
     private final String hostName;
     private int leaderVoteWait = DEFAULT_LEADER_VOTE_WAIT;
+    private int eligibleLeaderWait = DEFAULT_ELIGIBLE_LEADER_WAIT;
     private int leaderConflictResolveWait = DEFAULT_LEADER_CONFLICT_RESOLVE_WAIT;
     private String zkCredentialsProviderClass;
     private String zkACLProviderClass;
@@ -192,6 +205,11 @@ public class CloudConfig {
 
     public CloudConfigBuilder setLeaderVoteWait(int leaderVoteWait) {
       this.leaderVoteWait = leaderVoteWait;
+      return this;
+    }
+
+    public CloudConfigBuilder setEligibleLeaderWait(int eligibleLeaderWait) {
+      this.eligibleLeaderWait = eligibleLeaderWait;
       return this;
     }
 
@@ -256,6 +274,7 @@ public class CloudConfig {
           hostPort,
           hostName,
           leaderVoteWait,
+          eligibleLeaderWait,
           leaderConflictResolveWait,
           zkCredentialsProviderClass,
           zkACLProviderClass,

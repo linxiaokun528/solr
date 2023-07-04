@@ -110,6 +110,7 @@ public class TestSolrXml extends SolrTestCaseJ4 {
     assertEquals("host", "testHost", ccfg.getHost());
     assertEquals("solr host port", 44, ccfg.getSolrHostPort());
     assertEquals("leader vote wait", 55, ccfg.getLeaderVoteWait());
+    assertEquals("eligible leader wait", 66, ccfg.getEligibleLeaderWait());
     assertEquals("logging class", "testLoggingClass", cfg.getLogWatcherConfig().getLoggingClass());
     assertTrue("log watcher", cfg.getLogWatcherConfig().isEnabled());
     assertEquals("log watcher size", 88, cfg.getLogWatcherConfig().getWatcherSize());
@@ -200,12 +201,38 @@ public class TestSolrXml extends SolrTestCaseJ4 {
             + "<str name=\"host\">host</str>"
             + "<int name=\"hostPort\">0</int>"
             + "<null name=\"leaderVoteWait\"/>"
+            + "<null name=\"eligibleLeaderWait\"/>"
             + "</solrcloud></solr>";
 
     NodeConfig cfg = SolrXmlConfig.fromString(solrHome, solrXml);
     assertNull("maxBooleanClauses", cfg.getBooleanQueryMaxClauseCount()); // default is null
     assertEquals("leaderVoteWait", 180000, cfg.getCloudConfig().getLeaderVoteWait());
+    assertEquals("eligibleLeaderWait", -1, cfg.getCloudConfig().getEligibleLeaderWait());
     assertEquals("hostPort", 8000, cfg.getCloudConfig().getSolrHostPort());
+  }
+
+  public void testEligibleLeaderWait() {
+    String solrCloud =
+        "<solr><solrcloud><str name=\"host\">host</str><int name=\"hostPort\">8983</int>";
+    assertEquals(
+        -1,
+        SolrXmlConfig.fromString(solrHome, solrCloud + "</solrcloud></solr>")
+            .getCloudConfig()
+            .getEligibleLeaderWait());
+    for (int wait : new int[] {-1, -10, 0, 1234}) {
+      String solrXml =
+          solrCloud + "<int name=\"eligibleLeaderWait\">" + wait + "</int></solrcloud></solr>";
+      assertEquals(
+          wait,
+          SolrXmlConfig.fromString(solrHome, solrXml).getCloudConfig().getEligibleLeaderWait());
+    }
+    String invalid =
+        solrCloud + "<str name=\"eligibleLeaderWait\">forever</str></solrcloud></solr>";
+    SolrException thrown =
+        assertThrows(SolrException.class, () -> SolrXmlConfig.fromString(solrHome, invalid));
+    assertEquals(
+        "Error parsing 'eligibleLeaderWait', value 'forever' cannot be parsed as int",
+        thrown.getMessage());
   }
 
   // SOLR-18224: allowZkHosts is parsed via a helper that drops blank entries so a

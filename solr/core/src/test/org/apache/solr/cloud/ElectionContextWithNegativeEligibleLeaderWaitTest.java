@@ -16,9 +16,12 @@
  */
 package org.apache.solr.cloud;
 
+import com.carrotsearch.randomizedtesting.annotations.Name;
+import com.carrotsearch.randomizedtesting.annotations.ParametersFactory;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
+import org.apache.solr.common.cloud.Replica;
 import org.apache.solr.common.util.ExecutorUtil;
 import org.apache.solr.common.util.SolrNamedThreadFactory;
 import org.junit.BeforeClass;
@@ -27,6 +30,17 @@ import org.junit.Test;
 /** An indefinite eligibility wait keeps a stale replica from promoting itself. */
 public class ElectionContextWithNegativeEligibleLeaderWaitTest extends ElectionContextTestBase {
   private static final int UNLOAD_TIMEOUT_MS = NO_LEADER_WAIT_MS;
+  private static final int SHUTDOWN_TIMEOUT_MS = 3 * NO_LEADER_WAIT_MS;
+
+  public ElectionContextWithNegativeEligibleLeaderWaitTest(
+      @Name("replicaType") Replica.Type replicaType) {
+    super(replicaType);
+  }
+
+  @ParametersFactory
+  public static Iterable<Object[]> parameters() {
+    return replicaTypes();
+  }
 
   @BeforeClass
   public static void setupCluster() throws Exception {
@@ -44,6 +58,35 @@ public class ElectionContextWithNegativeEligibleLeaderWaitTest extends ElectionC
     leaderRunner.start();
     waitForLeader(leader);
     cluster.waitForActiveCollection(collectionName, 1, 2);
+    assertReplicaDocuments(leader, "baseline", "leader_only");
+    assertReplicaDocuments(follower, "baseline", "leader_only");
+  }
+
+  @Test
+  public void testShutdownWhileWaitingForEligibleLeader() throws Exception {
+    stopNodesWithUnequalTerms();
+    startStaleReplica();
+    assertNoLeaderFor(NO_LEADER_WAIT_MS);
+
+    ExecutorService executor =
+        ExecutorUtil.newMDCAwareSingleThreadExecutor(
+            new SolrNamedThreadFactory("stop-waiting-replica"));
+    try {
+      Future<?> shutdown =
+          executor.submit(
+              () -> {
+                stopNode(followerRunner);
+                return null;
+              });
+      shutdown.get(SHUTDOWN_TIMEOUT_MS, TimeUnit.MILLISECONDS);
+      assertTrue(followerRunner.isStopped());
+    } finally {
+      try {
+        leaderRunner.start();
+      } finally {
+        ExecutorUtil.shutdownNowAndAwaitTermination(executor);
+      }
+    }
   }
 
   @Test

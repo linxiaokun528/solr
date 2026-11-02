@@ -16,12 +16,19 @@
  */
 package org.apache.solr.cloud;
 
+import java.io.IOException;
+import java.util.List;
+import java.util.Set;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.stream.Collectors;
+import org.apache.solr.client.solrj.SolrServerException;
 import org.apache.solr.client.solrj.request.CollectionAdminRequest;
 import org.apache.solr.common.cloud.Replica;
+import org.apache.solr.common.util.TimeSource;
 import org.apache.solr.embedded.JettySolrRunner;
+import org.apache.solr.util.TimeOut;
 import org.junit.After;
 import org.junit.Before;
 import org.junit.Test;
@@ -33,11 +40,21 @@ public abstract class ElectionContextTestBase extends SolrCloudTestCase {
   protected static final int LEADER_VOTE_WAIT_MS = 1_000;
   protected static final int NO_LEADER_WAIT_MS = 10 * LEADER_VOTE_WAIT_MS;
 
+  protected final Replica.Type replicaType;
   protected String collectionName;
   protected Replica leader;
   protected Replica follower;
   protected JettySolrRunner leaderRunner;
   protected JettySolrRunner followerRunner;
+  protected long highestTermBeforeElection;
+
+  protected ElectionContextTestBase(Replica.Type replicaType) {
+    this.replicaType = replicaType;
+  }
+
+  protected static Iterable<Object[]> replicaTypes() {
+    return List.of(new Object[] {Replica.Type.NRT}, new Object[] {Replica.Type.TLOG});
+  }
 
   protected static void setupCluster(int eligibleLeaderWait) throws Exception {
     String solrXml =
@@ -50,12 +67,24 @@ public abstract class ElectionContextTestBase extends SolrCloudTestCase {
         .withSolrXml(solrXml)
         .addConfig("conf", configset("election-context"))
         .configure();
+    for (JettySolrRunner runner : cluster.getJettySolrRunners()) {
+      assertEquals(
+          eligibleLeaderWait, runner.getCoreContainer().getZkController().getEligibleLeaderWait());
+      assertEquals(
+          LEADER_VOTE_WAIT_MS, runner.getCoreContainer().getZkController().getLeaderVoteWait());
+    }
   }
 
   @Before
   public void createCollection() throws Exception {
     collectionName = "election_context_" + collectionSequence.incrementAndGet();
-    CollectionAdminRequest.createCollection(collectionName, "conf", 1, 2)
+    CollectionAdminRequest.createCollection(
+            collectionName,
+            "conf",
+            1,
+            replicaType == Replica.Type.NRT ? 2 : 0,
+            replicaType == Replica.Type.TLOG ? 2 : 0,
+            0)
         .process(cluster.getSolrClient());
     cluster.waitForActiveCollection(collectionName, 1, 2);
     leader = getCollectionState(collectionName).getSlice(SHARD).getLeader();
@@ -67,6 +96,14 @@ public abstract class ElectionContextTestBase extends SolrCloudTestCase {
             .orElseThrow();
     leaderRunner = cluster.getReplicaJetty(leader);
     followerRunner = cluster.getReplicaJetty(follower);
+    cluster.getSolrClient().add(collectionName, sdoc("id", "baseline"));
+    cluster.getSolrClient().commit(collectionName);
+    assertReplicaDocuments(leader, "baseline");
+    assertReplicaDocuments(follower, "baseline");
+    try (ZkShardTerms terms = new ZkShardTerms(collectionName, SHARD, cluster.getZkClient())) {
+      assertTrue(terms.getHighestTerm() > 0);
+      assertEquals(terms.getTerm(leader.getName()), terms.getTerm(follower.getName()));
+    }
   }
 
   @After
@@ -89,13 +126,14 @@ public abstract class ElectionContextTestBase extends SolrCloudTestCase {
             DEFAULT_TIMEOUT, TimeUnit.SECONDS, (oldNodes, nodes) -> !nodes.contains(nodeName));
   }
 
-  /** Leave both nodes stopped, with an update only on the former leader. */
+  /** Leave both nodes stopped, with one additional update only on the former leader. */
   protected void stopNodesWithUnequalTerms() throws Exception {
     stopNode(followerRunner);
-    cluster.getSolrClient().add(collectionName, sdoc("id", "0"));
+    cluster.getSolrClient().add(collectionName, sdoc("id", "leader_only"));
     cluster.getSolrClient().commit(collectionName);
     try (ZkShardTerms terms = new ZkShardTerms(collectionName, SHARD, cluster.getZkClient())) {
       assertTrue(terms.getTerm(leader.getName()) > terms.getTerm(follower.getName()));
+      highestTermBeforeElection = terms.getHighestTerm();
     }
     stopNode(leaderRunner);
   }
@@ -124,7 +162,8 @@ public abstract class ElectionContextTestBase extends SolrCloudTestCase {
                     (liveNodes, collection) -> {
                       Replica currentLeader =
                           collection == null ? null : collection.getSlice(SHARD).getLeader();
-                      return currentLeader != null && currentLeader.isActive(liveNodes);
+                      return currentLeader != null
+                          && liveNodes.contains(currentLeader.getNodeName());
                     }));
   }
 
@@ -141,10 +180,37 @@ public abstract class ElectionContextTestBase extends SolrCloudTestCase {
         });
   }
 
+  protected void assertReplicaDocuments(Replica replica, String... ids) throws Exception {
+    Set<String> expected = Set.of(ids);
+    new TimeOut(DEFAULT_TIMEOUT, TimeUnit.SECONDS, TimeSource.NANO_TIME)
+        .waitFor(
+            "Expected documents " + expected + " on replica " + replica.getName(),
+            () -> {
+              try {
+                var documents =
+                    cluster
+                        .getReplicaJetty(replica)
+                        .getSolrClient()
+                        .query(
+                            replica.getCoreName(),
+                            params("q", "*:*", "distrib", "false", "fl", "id"))
+                        .getResults();
+                return documents.getNumFound() == expected.size()
+                    && documents.stream()
+                        .map(doc -> doc.getFieldValue("id"))
+                        .collect(Collectors.toSet())
+                        .equals(expected);
+              } catch (SolrServerException | IOException e) {
+                throw new AssertionError("Cannot query replica " + replica.getName(), e);
+              }
+            });
+  }
+
   @Test
   public void testEqualTermReplicaBecomesLeaderAfterLeaderStops() throws Exception {
     stopNode(leaderRunner);
     waitForLeader(follower);
+    assertReplicaDocuments(follower, "baseline");
   }
 
   @Test
@@ -153,6 +219,7 @@ public abstract class ElectionContextTestBase extends SolrCloudTestCase {
     stopNode(leaderRunner);
     followerRunner.start();
     waitForLeader(follower);
+    assertReplicaDocuments(follower, "baseline");
   }
 
   @Test
@@ -160,13 +227,7 @@ public abstract class ElectionContextTestBase extends SolrCloudTestCase {
     stopNodesWithUnequalTerms();
     leaderRunner.start();
     waitForLeader(leader);
-    assertEquals(
-        1,
-        cluster
-            .getSolrClient()
-            .query(collectionName, params("q", "*:*"))
-            .getResults()
-            .getNumFound());
+    assertReplicaDocuments(leader, "baseline", "leader_only");
   }
 
   @Test
@@ -176,13 +237,8 @@ public abstract class ElectionContextTestBase extends SolrCloudTestCase {
     leaderRunner.start();
     waitForLeader(leader);
     cluster.waitForActiveCollection(collectionName, 1, 2);
-    assertEquals(
-        1,
-        cluster
-            .getSolrClient()
-            .query(collectionName, params("q", "*:*"))
-            .getResults()
-            .getNumFound());
+    assertReplicaDocuments(leader, "baseline", "leader_only");
+    assertReplicaDocuments(follower, "baseline", "leader_only");
   }
 
   @Test
@@ -194,6 +250,8 @@ public abstract class ElectionContextTestBase extends SolrCloudTestCase {
     waitForLeader(follower);
     try (ZkShardTerms terms = new ZkShardTerms(collectionName, SHARD, cluster.getZkClient())) {
       assertTrue(terms.canBecomeLeader(follower.getName()));
+      assertTrue(terms.getTerm(follower.getName()) >= highestTermBeforeElection);
     }
+    assertReplicaDocuments(follower, "baseline");
   }
 }

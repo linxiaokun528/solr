@@ -33,6 +33,7 @@ import org.apache.solr.common.cloud.Slice;
 import org.apache.solr.common.cloud.ZkCoreNodeProps;
 import org.apache.solr.common.cloud.ZkNodeProps;
 import org.apache.solr.common.cloud.ZkStateReader;
+import org.apache.solr.common.util.TimeSource;
 import org.apache.solr.core.CoreContainer;
 import org.apache.solr.core.SolrCore;
 import org.apache.solr.logging.MDCLoggingContext;
@@ -341,11 +342,18 @@ final class ShardLeaderElectionContext extends ShardLeaderElectionContextBase {
    */
   private boolean waitForEligibleBecomeLeaderAfterTimeout(
       ZkShardTerms zkShardTerms, String coreNodeName, int timeout) throws InterruptedException {
+    return waitForEligibleBecomeLeaderAfterTimeout(
+        zkShardTerms, coreNodeName, timeout, TimeSource.NANO_TIME);
+  }
+
+  boolean waitForEligibleBecomeLeaderAfterTimeout(
+      ZkShardTerms zkShardTerms, String coreNodeName, int timeout, TimeSource timeSource)
+      throws InterruptedException {
     String coreName = leaderProps.getStr(ZkStateReader.CORE_NAME_PROP);
     long timeoutAt =
-        System.nanoTime() + TimeUnit.NANOSECONDS.convert(timeout, TimeUnit.MILLISECONDS);
+        timeSource.getTimeNs() + TimeUnit.NANOSECONDS.convert(timeout, TimeUnit.MILLISECONDS);
     while (!shouldAbort() && cc.isLoaded(coreName)) {
-      if (timeout >= 0 && System.nanoTime() > timeoutAt) {
+      if (timeout >= 0 && timeSource.getTimeNs() > timeoutAt) {
         log.warn(
             "After waiting for {}ms, no other potential leader was found, {} try to become leader anyway (core_term:{}, highest_term:{})",
             timeout,
@@ -362,7 +370,7 @@ final class ShardLeaderElectionContext extends ShardLeaderElectionContextBase {
       if (zkShardTerms.canBecomeLeader(coreNodeName)) {
         return false;
       }
-      Thread.sleep(500L);
+      timeSource.sleep(500L);
     }
     return false;
   }

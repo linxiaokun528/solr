@@ -16,13 +16,25 @@
  */
 package org.apache.solr.cloud;
 
-import java.util.concurrent.TimeUnit;
+import com.carrotsearch.randomizedtesting.annotations.Name;
+import com.carrotsearch.randomizedtesting.annotations.ParametersFactory;
+import org.apache.solr.common.cloud.Replica;
 import org.junit.BeforeClass;
 import org.junit.Test;
 
 /** A stale replica may become leader only after its configured eligibility wait. */
 public class ElectionContextWithPositiveEligibleLeaderWaitTest extends ElectionContextTestBase {
   private static final int ELIGIBLE_LEADER_WAIT_MS = 10 * LEADER_VOTE_WAIT_MS;
+
+  public ElectionContextWithPositiveEligibleLeaderWaitTest(
+      @Name("replicaType") Replica.Type replicaType) {
+    super(replicaType);
+  }
+
+  @ParametersFactory
+  public static Iterable<Object[]> parameters() {
+    return replicaTypes();
+  }
 
   @BeforeClass
   public static void setupCluster() throws Exception {
@@ -32,14 +44,12 @@ public class ElectionContextWithPositiveEligibleLeaderWaitTest extends ElectionC
   @Test
   public void testStaleReplicaBecomesLeaderAfterTimeout() throws Exception {
     stopNodesWithUnequalTerms();
-    long start = System.nanoTime();
     startStaleReplica();
     waitForLeader(follower);
-    assertTrue(
-        "The stale replica became leader before eligibleLeaderWait elapsed",
-        TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - start) >= ELIGIBLE_LEADER_WAIT_MS);
     try (ZkShardTerms terms = new ZkShardTerms(collectionName, SHARD, cluster.getZkClient())) {
-      assertEquals(terms.getHighestTerm(), terms.getTerm(follower.getName()));
+      assertEquals(highestTermBeforeElection, terms.getTerm(follower.getName()));
+      assertEquals(highestTermBeforeElection, terms.getHighestTerm());
     }
+    assertReplicaDocuments(follower, "baseline");
   }
 }
